@@ -1,34 +1,23 @@
 name: CI
-
 on:
-  push:
   pull_request:
-
+  push:
+    branches: ["master"]
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install
+          python-version: "3.11"
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-
+          python -m pip install -r gui/requirements.txt -r requirements-dev.txt
       - name: Compile
-        run: python -m compileall -q src
-
-      - name: Test
-        run: pytest -q
-
+        run: |
+          python -m compileall -q gui
+      - name: Tests
+        run: |
+          python -m pytest -q

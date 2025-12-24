@@ -2,7 +2,7 @@
 
 AI로 생성된 이미지의 배경을 자동으로 제거하는 GUI 도구입니다.
 
-![Version](https://img.shields.io/badge/version-0.0.2-blue)
+![Version](https://img.shields.io/badge/version-0.0.3-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
@@ -23,9 +23,11 @@ AI로 생성된 이미지의 배경을 자동으로 제거하는 GUI 도구입�
 - **없음!** Aseprite, Python 설치 없이 바로 실행 가능
 
 ### 다운로드 & 실행
-1. [Releases](https://github.com/Stankjedi/I2g/releases)에서 `BackgroundCleaner_v0.0.2.exe` 다운로드
+1. [Releases](https://github.com/Stankjedi/I2g/releases)에서 `BackgroundCleaner_v0.0.3.exe` 다운로드
 2. 다운로드한 exe 파일 더블클릭
 3. 바로 사용 가능!
+
+> ✅ 배포용 EXE는 **GitHub Releases**로만 제공합니다. 저장소에는 바이너리(`gui/dist/`)를 커밋하지 않습니다.
 
 ---
 
@@ -58,7 +60,16 @@ python main.py
 | **Threshold** | 윤곽선 감지 밝기 임계값 (낮을수록 더 어두운 것만 윤곽선) | 20 | 10-40 |
 | **Dilation** | 가장자리 정리 반복 횟수 | 50 | 30-100 |
 
-> 💡 **팁**: 배경 잔여물이 남으면 Threshold를 낮추세요 (예: 15)
+#### 프리셋 사용
+- **Preset** 드롭다운에서 자주 쓰는 조합을 선택하거나, **Save Preset**으로 저장해 재사용할 수 있습니다.
+
+#### 파라미터 선택 가이드(요약)
+- **Threshold(윤곽선 민감도):** 값이 **낮을수록** 더 어두운 픽셀만 “윤곽선”으로 인정합니다.
+  - **내부 콘텐츠가 같이 지워짐(과삭제)** → Threshold를 **올리기**(예: 30~40)
+  - **배경이 덜 지워짐(잔여물)** → Threshold를 **내리기**(예: 10~20)
+- **Dilation(가장자리 정리 강도/횟수):** 값이 **높을수록** 제거 영역 가장자리를 더 적극적으로 정리합니다.
+  - **초록빛 잔여물/반투명 테두리** → Dilation을 **올리기**(예: 60~100)
+  - **처리가 너무 느림** → Dilation을 **내리기**(예: 10~40) 또는 이미지 해상도 낮춰 시도
 
 ### 3. 처리 실행
 - **🔄 Process** 버튼 클릭
@@ -85,6 +96,32 @@ python main.py
 
 ---
 
+## ⚠️ 제한 사항
+
+- 이 도구는 **“윤곽선(검은 테두리)”을 기준으로 외곽 배경을 제거**하는 방식입니다. 윤곽선이 약하거나 끊기면 결과가 불안정할 수 있습니다.
+- 알고리즘은 **이미지 모서리(코너) 색상**을 배경 기준으로 참고합니다. 모서리 배경 색이 크게 달라지거나 복잡하면 잔여물이 남을 수 있습니다.
+- 대형 이미지(고해상도) + 높은 Dilation 조합은 처리 시간이 길어질 수 있습니다.
+
+---
+
+## 🧯 트러블슈팅
+
+### 1) 내부 콘텐츠가 같이 지워지는 경우(과삭제)
+- Threshold를 **올리기**(예: 30~40)
+- Dilation을 **내리기**(예: 10~40)
+- 입력 이미지에서 윤곽선이 너무 어둡지 않거나, 내부 영역이 배경과 유사한 색이면 과삭제가 발생할 수 있습니다.
+
+### 2) 배경이 남거나 초록빛/반투명 테두리가 남는 경우
+- Threshold를 **내리기**(예: 10~20)
+- Dilation을 **올리기**(예: 60~100)
+- 배경 색이 여러 톤인 경우, 먼저 배경을 단순화한 이미지를 사용하면 성공률이 올라갑니다.
+
+### 3) 처리가 매우 느린 경우(대형 이미지)
+- Dilation을 **내리기**(예: 10~40)
+- 가능한 경우 입력 이미지를 **축소**한 뒤 처리 후 결과를 활용
+
+---
+
 ## ❓ FAQ
 
 ### Q: Aseprite가 필요한가요?
@@ -108,12 +145,13 @@ I2g/
 ├── gui/
 │   ├── main.py           # GUI 애플리케이션
 │   ├── cleanup_core.py   # 배경 제거 알고리즘
-│   └── requirements.txt  # Python 의존성
-├── workspace/
-│   ├── inbox/            # 입력 폴더
-│   └── out/              # 출력 폴더
-└── dist/
-    └── BackgroundCleaner_v0.0.2.exe  # 패키징된 실행 파일
+│   ├── BackgroundCleaner_v0.0.3.spec  # PyInstaller 스펙(예시)
+│   ├── requirements.txt  # Python 의존성
+│   └── dist/
+│       └── BackgroundCleaner_v0.0.3.exe  # 패키징된 실행 파일(로컬 빌드 산출물)
+├── docs/
+│   ├── before.png        # 사용 예시(전)
+│   └── after.png         # 사용 예시(후)
 ```
 
 ---
@@ -123,10 +161,32 @@ I2g/
 ```bash
 cd gui
 pip install pyinstaller
-pyinstaller --onefile --windowed --name "BackgroundCleaner_v0.0.2" --add-data "cleanup_core.py;." main.py
+pyinstaller --onefile --windowed --name "BackgroundCleaner_v0.0.3" --add-data "cleanup_core.py;." main.py
 ```
 
-빌드된 exe는 `dist/` 폴더에 생성됩니다.
+빌드된 exe는 `gui/dist/` 폴더에 생성됩니다. 해당 폴더는 **빌드 산출물**이므로 Git에 포함하지 않습니다.
+
+---
+
+## 🖥️ 배치 처리 CLI (개발자용)
+
+GUI 없이 파일/폴더를 일괄 처리하고 결과를 PNG로 저장합니다.
+
+### 사용 예시
+
+```bash
+# 단일 파일 처리
+python gui/cleanup_cli.py --input "input.png" --output-dir "out"
+
+# 폴더 처리(지원 확장자: png, jpg, jpeg, bmp, gif, webp)
+python gui/cleanup_cli.py --input "in_dir" --output-dir "out_dir" --threshold 20 --dilation 50
+
+# 하위 폴더까지 재귀 처리(폴더 구조 유지)
+python gui/cleanup_cli.py --input "in_dir" --output-dir "out_dir" --recursive --threshold 20 --dilation 50
+```
+
+- **출력 규칙:** `<파일명>_cleaned.png`로 저장(PNG 고정, 투명 배경 유지)
+- **재귀 모드:** `--recursive` 사용 시 입력 폴더 구조를 출력 폴더에 그대로 유지합니다.
 
 ---
 

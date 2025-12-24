@@ -2,215 +2,274 @@
 
 ## Mandatory Execution Rules
 1. Execute every prompt in order, starting from `[PROMPT-001]`. Do not skip or reorder.
-2. Do not respond with text-only explanations. For each prompt, make real code changes using file-edit tools (`replace_string_in_file`, `multi_replace_string_in_file`, `create_file`).
-3. After each prompt, run the verification commands listed in that prompt, fix failures, then proceed.
-4. Keep changes minimal and focused on the prompt. Do not implement unrelated refactors.
-5. Preserve existing style and conventions unless the prompt explicitly changes them.
+2. Do not respond with text-only explanations. For every change, use file-edit tools (`replace_string_in_file`, `multi_replace_string_in_file`, `create_file`).
+3. After each prompt: run the verification commands, fix failures, then proceed to the next prompt.
+4. Keep changes minimal and focused on the current prompt. Do not implement unrelated refactors.
+5. Use Python 3.10+ (the code uses PEP 604 union types like `X | None`).
+6. When a prompt updates documentation (for example `README.md`), keep the documentation written in Korean (the repository docs are Korean).
+7. Do not add new runtime dependencies unless a prompt explicitly requires them.
 
 ## Execution Checklist
 
 | # | Prompt ID | Title | Priority | Status |
 |:---:|:---|:---|:---:|:---:|
-| 1 | PROMPT-001 | Workspace Path Boundary Policy for Tool Arguments | P1 | ⬜ Pending |
-| 2 | PROMPT-002 | Normalize Line Endings and Repository Text Rules | P2 | ⬜ Pending |
-| 3 | PROMPT-003 | Lua Failure Metadata and Error Standardization | P2 | ⬜ Pending |
-| 4 | PROMPT-004 | Grid Auto-Detection with Offset/Padding | P3 | ⬜ Pending |
-| 5 | OPT-1 | Prune Watcher Internal State (Long-Run Stability) | OPT | ⬜ Pending |
+| 1 | PROMPT-001 | CI Pipeline (Tests + Compile) | P1 | ⬜ Pending |
+| 2 | PROMPT-002 | Release Artifacts & Cache Policy | P2 | ⬜ Pending |
+| 3 | PROMPT-003 | Package Layout: Make `gui` Importable | P2 | ⬜ Pending |
+| 4 | PROMPT-004 | CLI: Recursive Directory Processing | P2 | ⬜ Pending |
+| 5 | PROMPT-005 | GUI: Presets / Profiles | P3 | ⬜ Pending |
+| 6 | OPT-1 | Optimize cleanup_core Memory Footprint | OPT | ⬜ Pending |
 
-Total: 5 prompts | Completed: 0 | Remaining: 5
+Total: 6 prompts | Completed: 0 | Remaining: 6
 
 ## P1 Prompts
 
-### [PROMPT-001] Workspace Path Boundary Policy for Tool Arguments
+### [PROMPT-001] CI Pipeline (Tests + Compile)
 Execute this prompt now, then proceed to `[PROMPT-002]`.
 
 Task description:
-- Make all path-like tool arguments safe, predictable, and consistently validated against `workspace_root` by default.
+- Add a GitHub Actions CI workflow that runs unit tests and a quick compile check on every pull request and push.
 
 Target files:
-- `src/ss_anim_mcp/server.py`
-- `src/ss_anim_mcp/config.py` (optional)
-- `tests/` (add/update tests)
+- `.github/workflows/ci.yml` (new)
+- `requirements-dev.txt` (update if needed)
 
 Steps:
-1. Introduce a single path resolver/validator in `server.py` (or a small new module):
-   - Inputs: raw string, `workspace_root`, `allow_external_paths`, and a `field_name`.
-   - Behavior:
-     - Expand `~` (home) if present.
-     - If the path is relative, resolve it under `workspace_root`.
-     - Resolve to an absolute path.
-     - If `allow_external_paths` is false, reject paths outside `workspace_root` with `error_code=PATH_OUTSIDE_WORKSPACE`.
-2. Apply the policy consistently across tool handlers:
-   - `watch_start`: validate `inbox_dir`, `out_dir`, `processed_dir`, `failed_dir`.
-   - `convert_inbox`: validate `processed_dir`, `failed_dir` (keep current behavior) and ensure the error payload includes the rejected `path` and `workspace_root`.
-   - `convert_file`: add optional `allow_external_paths` and validate `input_path` and `out_dir`.
-   - `dry_run_detect`: add optional `allow_external_paths` and validate `input_path`.
-3. Ensure validation happens before any file I/O that could leak information about external paths (reject outside-workspace paths before checking `exists()`).
-4. Add tests that do not require Aseprite:
-   - `convert_file` rejects an external `input_path` by default and returns `PATH_OUTSIDE_WORKSPACE`.
-   - `convert_file` accepts the same `input_path` when `allow_external_paths=true` (and still returns `FILE_NOT_FOUND` if it does not exist).
-   - `watch_start` rejects external `inbox_dir`/`out_dir` when `allow_external_paths=false`.
-5. Update tool schemas (`list_tools`) to include any new optional fields and keep changes additive.
+1. Create `.github/workflows/ci.yml` with the following workflow content:
+   ```yaml
+   name: CI
+   on:
+     pull_request:
+     push:
+       branches: ["master"]
+   jobs:
+     test:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v4
+         - uses: actions/setup-python@v5
+           with:
+             python-version: "3.11"
+         - name: Install dependencies
+           run: |
+             python -m pip install --upgrade pip
+             python -m pip install -r gui/requirements.txt -r requirements-dev.txt
+         - name: Compile
+           run: |
+             python -m compileall -q gui
+         - name: Tests
+           run: |
+             python -m pytest -q
+   ```
+2. Ensure `requirements-dev.txt` includes at least:
+   - `pytest>=7.0`
+3. Keep the workflow fast and deterministic:
+   - Do not download external test assets.
+   - Do not run GUI code in CI.
 
 Implementation requirements:
-- Keep existing tool names and response shapes; only add new optional fields.
-- Error responses must include `error_code`, `message`, and the relevant `path` and `workspace_root`.
+- Use file-edit tools to apply all changes.
+- Do not add new runtime dependencies.
 
 Verification:
-- `python -m compileall -q src`
-- `pytest -q`
+- `python -m compileall -q gui`
+- `python -m pytest -q`
 
 After completing this prompt, proceed to `[PROMPT-002]`.
 
 ## P2 Prompts
 
-### [PROMPT-002] Normalize Line Endings and Repository Text Rules
+### [PROMPT-002] Release Artifacts & Cache Policy
 Execute this prompt now, then proceed to `[PROMPT-003]`.
 
 Task description:
-- Remove line-ending inconsistencies (CRLF/stray control characters) and add repository-level rules to prevent regressions.
+- Define and enforce a clean repository policy: source code and specs stay tracked; build artifacts and caches do not.
 
 Target files:
-- `.gitattributes` (create)
-- `src/ss_anim_mcp/watcher.py`
-- `aseprite_scripts/convert_sheet_to_anim.lua`
-- `.vscode/mcp.json` (optional, only if tracked/used)
+- `.gitignore`
+- `README.md`
+- `gui/dist/` (if committed artifacts exist, remove them)
+- `.pytest_cache/` (if present, remove it)
 
 Steps:
-1. Add a `.gitattributes` file that enforces LF for text files:
-   - At minimum: `* text=auto eol=lf`
-   - Add explicit rules for common extensions in this repo (`.py`, `.md`, `.lua`, `.json`, `.yml`, `.toml`).
-2. Normalize line endings to LF for the affected files:
-   - Rewrite the files so they no longer contain carriage returns (`\\r`).
-   - Keep semantics unchanged; do not refactor logic in this prompt.
-3. (Optional) Add a lightweight CI/test guard:
-   - Add a small script (for example `scripts/check_crlf.py`) or a pytest test that fails if tracked source files contain `\\r`.
-4. Ensure the repository still builds and tests pass.
+1. Update `.gitignore` (keep existing rules, only add missing ones) so these paths are ignored:
+   - `gui/dist/`
+   - `.pytest_cache/`
+2. If committed build artifacts and caches exist under those paths, remove them from the repository contents.
+3. Update `README.md` (in Korean) to clarify:
+   - Releases are distributed via GitHub Releases (not committed binaries).
+   - How to build the EXE locally using PyInstaller and the `.spec` file(s).
+4. Do not remove documentation images under `docs/`.
 
 Implementation requirements:
-- No behavior changes beyond line-ending normalization and the addition of `.gitattributes`.
-- If you add a CI/test guard, keep it fast and deterministic.
+- Use file-edit tools to apply all changes.
+- Keep behavior of the app unchanged (this is repository hygiene and documentation only).
 
 Verification:
-- `python -m compileall -q src`
-- `pytest -q`
+- `python -m compileall -q gui`
+- `python -m pytest -q`
 
 After completing this prompt, proceed to `[PROMPT-003]`.
 
-### [PROMPT-003] Lua Failure Metadata and Error Standardization
+### [PROMPT-003] Package Layout: Make `gui` Importable
 Execute this prompt now, then proceed to `[PROMPT-004]`.
 
 Task description:
-- Make failures diagnosable by ensuring Lua writes a structured `meta.json` for all error paths and Python surfaces that information as `error_code`/`error_message`.
+- Turn `gui/` into a proper Python package and remove brittle `sys.path` hacks in tests, while keeping existing entrypoints working.
 
 Target files:
-- `aseprite_scripts/convert_sheet_to_anim.lua`
-- `src/ss_anim_mcp/aseprite_runner.py`
-- `tests/` (add/update tests)
+- `gui/__init__.py` (new)
+- `gui/main.py`
+- `gui/cleanup_cli.py`
+- `tests/test_cleanup_core.py`
+- `tests/test_cleanup_cli.py`
+- `gui/BackgroundCleaner_v0.0.2.spec` (update only if needed)
 
 Steps:
-1. In `convert_sheet_to_anim.lua`, introduce a small `write_meta(status, payload)` helper that:
-   - Writes `meta.json` to `output_dir` even on early failures.
-   - Includes: `status` (`success`/`failed`), `error_code`, `error_message`, and a minimal `params` snapshot (only safe, non-binary fields).
-2. Replace all early `return` failure paths (missing `input_path`, missing `output_dir`, file not found, sprite open failure, invalid frame dimensions, etc.) to:
-   - Print a concise error line.
-   - Call `write_meta(\"failed\", ...)`.
-   - Close any opened sprite if needed.
-3. In `AsepriteRunner.run_conversion(...)`, after the subprocess exits with code 0:
-   - Parse `meta.json` (if present and valid).
-   - If `meta.status == \"failed\"`, return `ConvertResult(success=False, error_code=meta.error_code or \"LUA_REPORTED_FAILURE\", error_message=meta.error_message or \"Lua conversion failed\")`.
-   - Keep the existing output contract validation as a separate check for missing outputs.
-4. Add unit tests without invoking Aseprite:
-   - Add a helper (for example `_interpret_meta_failure(meta: dict) -> tuple[Optional[str], Optional[str]]`) and test status parsing for both `success` and `failed` payloads.
-   - Add a test fixture `meta.json` sample file (string) and ensure parsing is stable.
+1. Create `gui/__init__.py` (an empty file is acceptable).
+2. Update imports to prefer package-relative imports with a safe fallback for script execution:
+   - In `gui/main.py` and `gui/cleanup_cli.py`, use:
+     ```python
+     try:
+         from .cleanup_core import CancelledError, cleanup_background
+     except ImportError:
+         from cleanup_core import CancelledError, cleanup_background
+     ```
+3. Update tests to use normal imports from the repository root (no `sys.path.insert`):
+   - `from gui.cleanup_core import CancelledError, cleanup_background`
+   - `from gui import cleanup_cli`
+4. Ensure both execution modes remain valid:
+   - `python gui/main.py` and `python -m gui.main`
+   - `python gui/cleanup_cli.py ...` and `python -m gui.cleanup_cli ...`
+5. Keep all public behavior unchanged (this is an import/layout change only).
 
 Implementation requirements:
-- Do not require Aseprite/FFmpeg in tests.
-- Do not change successful output paths or filenames; keep existing contracts.
+- Use file-edit tools to apply all changes.
+- Do not add new runtime dependencies.
 
 Verification:
-- `python -m compileall -q src`
-- `pytest -q`
+- `python -m compileall -q gui`
+- `python -m pytest -q`
 
 After completing this prompt, proceed to `[PROMPT-004]`.
 
+### [PROMPT-004] CLI: Recursive Directory Processing
+Execute this prompt now, then proceed to `[PROMPT-005]`.
+
+Task description:
+- Add an opt-in recursive mode to the CLI so nested input directories can be batch-processed reliably.
+
+Target files:
+- `gui/cleanup_cli.py`
+- `tests/test_cleanup_cli.py`
+- `README.md` (update in Korean)
+
+Steps:
+1. Add a new flag:
+   - `--recursive` (boolean, default: false)
+2. Keep current behavior unchanged when `--recursive` is not provided.
+3. When `--input` is a directory and `--recursive` is set:
+   - Discover files via `Path.rglob("*")` filtered by supported extensions.
+   - Sort file paths for deterministic processing order.
+   - Preserve directory structure under `--output-dir`:
+     - For each file, compute `rel = file_path.relative_to(input_dir)`.
+     - Save to `output_dir / rel.parent / f"{file_path.stem}_cleaned.png"` (create parent dirs).
+4. Extend tests:
+   - Add a nested input folder with at least 1 image.
+   - Run `cleanup_cli.main([... , "--recursive", ...])`.
+   - Assert the output exists under the matching nested folder.
+5. Update `README.md` with a recursive usage example and a note that directory structure is preserved in recursive mode.
+
+Implementation requirements:
+- Use file-edit tools to apply all changes.
+- Keep exit codes and existing output naming stable for non-recursive mode.
+- Do not import tkinter; the CLI must run headlessly.
+
+Verification:
+- `python -m compileall -q gui`
+- `python -m pytest -q`
+
+After completing this prompt, proceed to `[PROMPT-005]`.
+
 ## P3 Prompts
 
-### [PROMPT-004] Grid Auto-Detection with Offset/Padding
+### [PROMPT-005] GUI: Presets / Profiles
 Execute this prompt now, then proceed to `[OPT-1]`.
 
 Task description:
-- Improve grid auto-detection to estimate `offset_x/offset_y` and `pad_x/pad_y` for spritesheets with margins/padding, reducing the need for manual `.job.json` overrides.
+- Add preset/profile support so users can save and reuse `Threshold`/`Dilation` combinations from the GUI.
 
 Target files:
-- `src/ss_anim_mcp/detector.py`
-- `src/ss_anim_mcp/aseprite_runner.py` (only if needed for wiring)
-- `tests/` (add new tests)
+- `gui/main.py`
+- `README.md` (optional; update in Korean if you add usage notes)
 
 Steps:
-1. Extend the detection algorithm in `GridDetector.detect(...)`:
-   - Keep the current background color detection and gap analysis.
-   - Add edge scanning to estimate offsets:
-     - `offset_y`: number of top rows that are mostly background (by the same threshold logic).
-     - `offset_x`: number of left columns that are mostly background.
-   - After applying offsets, estimate padding:
-     - Use gap groups to estimate typical gap thickness (for example median group width) and treat it as `pad_x`/`pad_y`.
-   - Keep the algorithm conservative:
-     - If estimates are uncertain or inconsistent, fall back to `0` for offset/pad and add a note.
-2. Return a `GridConfig` that includes the estimated `offset_x/offset_y/pad_x/pad_y`.
-3. Add tests using Pillow-generated synthetic spritesheets:
-   - Create RGBA images with a solid background color and filled rectangles for frames.
-   - Generate at least one case with non-zero offset and non-zero padding (for example 3x4 frames, 2px padding, 5px margin).
-   - Save to `tmp_path`, run `detect_grid(...)`, and assert the detected rows/cols/offset/pad match expected values.
-4. Keep wiring stable:
-   - `AsepriteRunner` should continue to apply the detected `GridConfig` when `auto_detect_grid` is enabled and the effective grid is the default 1x1.
+1. Add a persistent preset store (no new dependencies):
+   - Use `json` and store presets at `Path.home() / ".i2g_presets.json"`.
+   - Use a simple schema: `{ "Preset Name": {"threshold": 20, "dilation": 50}, ... }`.
+2. Add UI controls in the toolbar:
+   - A preset dropdown (combobox or option menu)
+   - A "Save Preset" action (ask for a name via `tkinter.simpledialog.askstring`)
+   - A "Delete Preset" action (confirm via `messagebox`)
+3. Preset behavior:
+   - Selecting a preset updates the UI vars and entries (`threshold_var`, `dilation_var`).
+   - Presets load on app startup; invalid JSON falls back to defaults with a user-visible warning.
+   - Disable preset modifications while processing is running.
+4. Add a few built-in presets (hardcoded defaults) and merge with user presets without overwriting user-defined names.
 
 Implementation requirements:
-- Keep detection deterministic and reasonably fast (do not scan every pixel in large images).
-- Preserve existing behavior for spritesheets without padding/margins.
+- Use file-edit tools to apply all changes.
+- Keep the cleanup algorithm API unchanged.
 
 Verification:
-- `python -m compileall -q src`
-- `pytest -q`
+- `python -m compileall -q gui`
+- `python -m pytest -q`
+- Manual check: run the GUI, save a preset, restart, and confirm it reloads and applies correctly.
 
 After completing this prompt, proceed to `[OPT-1]`.
 
 ## OPT Prompts
 
-### [OPT-1] Prune Watcher Internal State (Long-Run Stability)
+### [OPT-1] Optimize cleanup_core Memory Footprint
 Execute this prompt now, then proceed to the final completion section.
 
 Task description:
-- Prevent unbounded growth of watcher state in long-running watch mode to improve stability and memory usage.
+- Reduce memory overhead in `cleanup_background()` for large images while preserving output quality and keeping tests stable.
 
 Target files:
-- `src/ss_anim_mcp/watcher.py`
-- `tests/` (add/update tests)
+- `gui/cleanup_core.py`
+- `tests/test_cleanup_core.py` (update/add tests if needed)
 
 Steps:
-1. Make pruning testable:
-   - Extract state cleanup into a helper method (for example `_prune_state(current_files: set[Path]) -> None`) or a small helper function.
-2. In the polling loop (`_watch_loop_polling`):
-   - After computing `current_files`, prune `seen_files` to keep only keys that are still in `current_files`.
-   - Prune `_processed_files` to remove paths that no longer exist in `inbox_dir` (or are not in `current_files`).
-3. In the watchfiles loop (`_watch_loop_watchfiles`):
-   - Add a lightweight periodic prune (for example when `_processed_files` exceeds a threshold) that removes entries whose paths no longer exist.
-4. Add unit tests:
-   - Seed `_processed_files` and `seen_files` with many fake entries, run the prune helper once, and assert the collections shrink to the expected bounded set.
-   - Ensure normal behavior remains unchanged for active files.
+1. Keep the public API and stats keys stable.
+2. Replace large 2D boolean structures with compact flat arrays:
+   - Convert `visited`, `removed`, `protected` into `bytearray(w * h)` (index: `i = y * w + x`).
+   - Update all reads/writes accordingly.
+3. Keep algorithm phases and semantics unchanged:
+   - Edge flood fill (background discovery)
+   - Outline protection
+   - Frontier-based dilation
+   - Isolated pixel cleanup
+   - Apply removals and emit stats
+4. Reduce avoidable overhead without changing results:
+   - Avoid per-pass sorting of the frontier if output remains identical.
+   - Minimize repeated attribute lookups inside hot loops (use local variables).
+5. If you change internal ordering, ensure determinism:
+   - `test_cleanup_is_deterministic` must still pass unchanged.
 
 Implementation requirements:
-- Avoid re-processing active files in the inbox.
-- Keep public tool behavior unchanged; this is an internal stability improvement.
+- Use file-edit tools to apply all changes.
+- Do not add new dependencies.
+- Keep code readable (small helpers are fine; avoid unrelated refactors).
 
 Verification:
-- `python -m compileall -q src`
-- `pytest -q`
+- `python -m compileall -q gui`
+- `python -m pytest -q`
 
 ## Final Completion
-1. Confirm every checklist item status is updated to "Completed" in your final response.
+1. Confirm every checklist item is completed in your final response.
 2. Run final verification:
-   - `python -m compileall -q src`
-   - `pytest -q`
+   - `python -m compileall -q gui`
+   - `python -m pytest -q`
 3. Print this completion message exactly:
    - `ALL PROMPTS COMPLETED. All pending improvement and optimization items from the latest report have been applied.`

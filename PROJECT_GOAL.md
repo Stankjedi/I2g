@@ -1,147 +1,79 @@
-# 프로젝트 목표: I2g (Image to Game Animation)
+# 프로젝트 목표: I2g (AI Image Background Cleaner)
 
 ## 개요
 
-**한 장의 스프라이트시트 PNG → 자동 분할 → 기준점(발/피벗) 자동 정렬 → 게임 제작에 바로 쓰기 좋은 애니메이션 산출물** 생성을 자동화하는 MCP 서버
+**AI로 생성된 이미지의 배경을 자동 제거하는 GUI 도구**를 제공하여, 작업 시간을 줄이고 결과 품질을 일관되게 유지하는 것이 목표입니다.
 
-### 산출물 형식
-- `anim.aseprite` - 게임 파이프라인 원본
-- `anim_sheet.png` + `anim_sheet.json` - 게임 엔진용 (Unity/Godot 호환)
-- `anim_preview.gif` - 미리보기/커뮤니케이션용
+---
+
+## 핵심 목표
+
+1. **빠르고 안정적인 배경 제거**
+   - 윤곽선 기반 알고리즘으로 외곽 배경만 제거
+2. **직관적인 사용자 경험**
+   - 실시간 미리보기, 확대/축소, 이동, 파라미터 조정
+3. **재현 가능한 결과**
+   - 파라미터 기반 처리로 결과 일관성 확보
+4. **로컬 단독 실행**
+   - Python/Pillow 기반, 외부 도구 의존 최소화
 
 ---
 
 ## 사용자 플로우
 
-1. 사용자가 `inbox/` 폴더에 **PNG 1장** 넣음
-2. 사용자가 AI에게: **"방금 넣은 이미지로 게임용 애니메이션 만들어줘"** 요청
-3. AI가 MCP 툴 호출 → `inbox/` 스캔 또는 감시 모드 활성화
-4. MCP 서버가 **Aseprite CLI + Lua 스크립트** 실행으로 자동 처리
-5. `out/<작업명>/`에 산출물 생성
+1. 사용자가 이미지 파일을 선택해 열기
+2. Threshold/Dilation 등 파라미터 조정(선택)
+3. Process 실행 → 결과 미리보기
+4. 결과 PNG 저장(투명 배경 유지)
 
 ---
 
-## 아키텍처
+## 아키텍처(간단)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  AI/Codex                                                   │
-│  ↓ MCP 툴 호출                                              │
-├─────────────────────────────────────────────────────────────┤
-│  MCP 서버 (FastMCP + Python)                                │
-│  ├─ watch_start/stop     ← 폴더 감시                        │
-│  ├─ convert_inbox        ← 배치 처리                        │
-│  ├─ convert_file         ← 단일 파일 처리                   │
-│  └─ status               ← 상태 조회                        │
-├─────────────────────────────────────────────────────────────┤
-│  작업 큐 (동시성 1)                                         │
-│  ↓                                                          │
-│  Aseprite CLI + Lua 스크립트                                │
-│  ├─ 프레임 분할 (그리드 기반 Import)                        │
-│  ├─ 배경 투명화 (색상 매칭 기반, 향후 flood-fill 가능)       │
-│  ├─ 기준점 정렬 (foot anchor)                               │
-│  ├─ 타이밍 설정 (FPS + 루프 모드)                           │
-│  └─ 내보내기 (.aseprite + PNG+JSON + GIF)                   │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────┐
+│ GUI (Tkinter)                    │
+│  ├─ 파일 열기/저장               │
+│  ├─ 파라미터 조정                │
+│  ├─ 미리보기/줌/드래그            │
+│  └─ 상태/진행 표시               │
+├──────────────────────────────────┤
+│ cleanup_core.py                  │
+│  ├─ 윤곽선 감지                  │
+│  ├─ 외곽 배경 제거               │
+│  ├─ 테두리 정리(팽창)            │
+│  └─ 결과 통계 반환               │
+└──────────────────────────────────┘
 ```
 
 ---
 
-## MCP 툴 스펙
+## 범위 및 비범위
 
-| 툴 이름 | 설명 | 반환 |
-|---------|------|------|
-| `watch_start` | 폴더 감시 시작 | `WatchStatus` |
-| `watch_stop` | 감시 종료 | `Result` |
-| `convert_inbox` | inbox 파일 일괄 처리 | `BatchReport` |
-| `convert_file` | 단일 파일 처리 | `ConvertReport` |
-| `status` | 서버 상태 조회 | `ServerStatus` |
-| `dry_run_detect` | 그리드 자동 감지 미리보기 | `DetectionReport` |
+- **포함(현재):** GUI 기반 단일 이미지 배경 제거, 미리보기, PNG 저장
+- **향후 확장(옵션):** 디렉터리 단위 반복 작업을 위한 배치 처리 CLI(자동화 범위 확대)
+- **비포함(현재):** 서버/자동화 파이프라인, 온라인 처리, 대규모 데이터셋 파이프라인
 
 ---
 
-## JobSpec (설정 오버라이드)
+## 전제 및 제한 사항(요약)
 
-기본은 자동 감지이며, 입력 파일 옆에 `<입력파일 스템>.job.json`을 두면 설정을 오버라이드할 수 있습니다. (예: `walk.png` → `walk.job.json`)
-
-- **지원 키:** `grid`, `timing`, `anchor`, `background`, `export`, `auto_detect_grid`
-- **우선순위:** MCP 툴 인자(`grid_rows`, `grid_cols`, `fps`) > `.job.json` > 프로필 기본값
-
-```json
-{
-  "grid": { "rows": 3, "cols": 4 },
-  "timing": { "fps": 12, "loop_mode": "loop" },
-  "anchor": { "mode": "foot", "alpha_thresh": 10 },
-  "background": { "mode": "transparent" },
-  "auto_detect_grid": true,
-  "export": {
-    "aseprite": true,
-    "sheet_png_json": true,
-    "gif_preview": true
-  }
-}
-```
-
----
-
-## 변환 품질 핵심 로직
-
-### 1. 프레임 분할
-- JobSpec에 rows/cols가 있으면 그대로 사용
-- 없으면 Python detector가 배경 분석으로 그리드 자동 추정
-
-### 2. 배경 투명화
-- **현재 구현:** 배경색(`bg_color`)과 허용 오차(`bg_tolerance`)로 매칭되는 픽셀을 투명 처리(단순 색상 치환)
-- **향후 개선:** edge flood-fill 방식으로 연결된 배경만 제거하여 내부 디테일 보존을 강화
-
-### 3. 기준점 정렬 (지터 제거)
-- `foot` 모드: 하단 불투명 픽셀 기준선 감지
-- `anchor_x`: baseline 근처 픽셀들의 median
-- 모든 프레임을 타깃 앵커로 이동 → 캔버스 확장으로 잘림 방지
-
-### 4. 게임 엔진 Export
-- `ExportSpriteSheet` API로 PNG+JSON 생성
-- padding, trim, dataFormat 옵션 지원
-
----
-
-## 수용 기준
-
-| 항목 | 기준 |
-|------|------|
-| 12프레임(4x3) 입력 시 산출물 생성 | sheet.png, sheet.json, .aseprite, preview.gif |
-| 앵커 지터 | `anchor_jitter_rms_px <= 1.0` |
-| 프레임 duration | 모두 동일 |
-| 실패 처리 | `failed/`로 이동 + error.txt 생성 |
-| E2E 플로우 | inbox에 넣고 `convert_inbox` 1회 호출로 완료 |
+- 윤곽선(검은 테두리)이 명확한 이미지에서 가장 잘 동작합니다. 윤곽선이 약하거나 끊기면 결과가 불안정할 수 있습니다.
+- 이미지 모서리(코너) 배경 색상을 기준으로 외곽 배경을 추정하므로, 코너 배경이 복잡하거나 여러 톤이면 잔여물이 남을 수 있습니다.
+- 고해상도 이미지에서 Dilation 값을 크게 사용하면 처리 시간이 길어질 수 있습니다.
 
 ---
 
 ## 기술 스택
 
-- **런타임**: Python 3.10+
-- **MCP 프레임워크**: FastMCP (python-sdk)
-- **폴더 감시**: watchfiles (기본), polling (fallback)
-- **스키마**: Pydantic
-- **이미지 분석**: Pillow (그리드 감지)
-- **변환 엔진**: Aseprite CLI + Lua
-- **후처리**: FFmpeg, gifsicle (선택)
+- **런타임:** Python 3.10+
+- **GUI:** Tkinter
+- **이미지 처리:** Pillow
 
 ---
 
-## 환경 변수
+## 성공 기준
 
-| 변수명 | 설명 | 필수 |
-|--------|------|------|
-| `ASEPRITE_EXE` | Aseprite 실행 파일 경로 | ✓ |
-| `SS_ANIM_WORKSPACE` | 워크스페이스 루트 경로 | × (기본: `./workspace`) |
-
----
-
-## 레퍼런스
-
-- [Aseprite CLI 문서](https://www.aseprite.org/docs/cli/)
-- [Aseprite ImportSpriteSheet API](https://www.aseprite.org/api/command/ImportSpriteSheet)
-- [Aseprite ExportSpriteSheet API](https://www.aseprite.org/api/command/ExportSpriteSheet)
-- [FastMCP (Python SDK)](https://github.com/modelcontextprotocol/python-sdk)
-- [참고 레포: diivi/aseprite-mcp](https://github.com/diivi/aseprite-mcp)
+- 윤곽선 기반 배경 제거가 안정적으로 동작할 것
+- 기본 파라미터로 대다수 입력에서 만족 가능한 결과가 나올 것
+- 사용자가 1분 내에 입력→처리→저장까지 완료할 수 있을 것

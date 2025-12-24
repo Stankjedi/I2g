@@ -3,14 +3,18 @@ Configuration module for ss_anim_mcp server.
 Handles environment variables, paths, and conversion profiles.
 """
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class GridConfig(BaseModel):
     """Grid configuration for spritesheet splitting."""
+
     rows: int = Field(default=1, ge=1, description="Number of rows in the grid")
     cols: int = Field(default=1, ge=1, description="Number of columns in the grid")
     offset_x: int = Field(default=0, ge=0, description="X offset from top-left")
@@ -21,26 +25,57 @@ class GridConfig(BaseModel):
 
 class TimingConfig(BaseModel):
     """Timing configuration for animation."""
+
     fps: int = Field(default=12, ge=1, le=120, description="Frames per second")
-    loop_mode: str = Field(default="loop", description="Loop mode: 'loop' or 'pingpong'")
+    loop_mode: Literal["loop", "pingpong"] = Field(default="loop", description="Loop mode: 'loop' or 'pingpong'")
+
+    @field_validator("loop_mode", mode="before")
+    @classmethod
+    def normalize_loop_mode(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
 
 
 class AnchorConfig(BaseModel):
     """Anchor/pivot configuration for frame alignment."""
-    mode: str = Field(default="foot", description="Anchor mode: 'foot', 'center', 'none'")
+
+    mode: Literal["foot", "center", "none"] = Field(
+        default="foot",
+        description="Anchor mode: 'foot', 'center', 'none'",
+    )
     alpha_thresh: int = Field(default=10, ge=0, le=255, description="Alpha threshold for opaque detection")
     x_band: tuple[float, float] = Field(default=(0.25, 0.75), description="X band for anchor detection")
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def normalize_mode(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
 
 
 class BackgroundConfig(BaseModel):
     """Background processing configuration."""
-    mode: str = Field(default="transparent", description="Mode: 'transparent', 'keep', 'color'")
+
+    mode: Literal["transparent", "keep", "color"] = Field(
+        default="transparent",
+        description="Mode: 'transparent', 'keep', 'color'",
+    )
     color: tuple[int, int, int] = Field(default=(255, 255, 255), description="Background color RGB")
     tolerance: int = Field(default=8, ge=0, le=255, description="Color match tolerance")
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def normalize_mode(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
 
 
 class ExportConfig(BaseModel):
     """Export configuration."""
+
     aseprite: bool = Field(default=True, description="Export .aseprite file")
     sheet_png_json: bool = Field(default=True, description="Export sheet PNG + JSON")
     gif_preview: bool = Field(default=True, description="Export GIF preview")
@@ -52,6 +87,7 @@ class ExportConfig(BaseModel):
 
 class ConversionProfile(BaseModel):
     """Complete conversion profile combining all configs."""
+
     name: str = Field(default="default", description="Profile name")
     grid: GridConfig = Field(default_factory=GridConfig)
     timing: TimingConfig = Field(default_factory=TimingConfig)
@@ -60,7 +96,6 @@ class ConversionProfile(BaseModel):
     export: ExportConfig = Field(default_factory=ExportConfig)
 
 
-# Predefined profiles
 PROFILES: dict[str, ConversionProfile] = {
     "game_default": ConversionProfile(
         name="game_default",
@@ -91,6 +126,7 @@ PROFILES: dict[str, ConversionProfile] = {
 
 class Settings(BaseModel):
     """Application settings from environment variables."""
+
     aseprite_exe: Path = Field(description="Path to Aseprite executable")
     workspace_root: Path = Field(description="Workspace root directory")
     inbox_dir: Path = Field(description="Input directory")
@@ -103,12 +139,10 @@ class Settings(BaseModel):
     @classmethod
     def from_env(cls, workspace_override: Optional[Path] = None) -> "Settings":
         """Create settings from environment variables."""
-        # Get Aseprite executable path
         aseprite_exe_env = os.environ.get("ASEPRITE_EXE")
         if aseprite_exe_env:
             aseprite_exe = Path(aseprite_exe_env)
         else:
-            # Try common locations on Windows
             common_paths = [
                 Path(r"C:\Program Files\Aseprite\Aseprite.exe"),
                 Path(r"C:\Program Files (x86)\Aseprite\Aseprite.exe"),
@@ -122,7 +156,6 @@ class Settings(BaseModel):
             if aseprite_exe is None:
                 aseprite_exe = Path("aseprite")  # Assume in PATH
 
-        # Get workspace root
         if workspace_override:
             workspace_root = workspace_override
         else:
@@ -130,12 +163,9 @@ class Settings(BaseModel):
             if workspace_env:
                 workspace_root = Path(workspace_env)
             else:
-                # Default: ./workspace relative to package
                 workspace_root = Path(__file__).parent.parent.parent / "workspace"
 
         workspace_root = workspace_root.resolve()
-
-        # Lua scripts directory
         lua_scripts_dir = Path(__file__).parent.parent.parent / "aseprite_scripts"
 
         return cls(
@@ -161,7 +191,6 @@ class Settings(BaseModel):
         return PROFILES["game_default"].model_copy(deep=True)
 
 
-# Global settings instance (lazy loaded)
 _settings: Optional[Settings] = None
 
 
@@ -171,3 +200,4 @@ def get_settings(workspace_override: Optional[Path] = None) -> Settings:
     if _settings is None or workspace_override:
         _settings = Settings.from_env(workspace_override)
     return _settings
+

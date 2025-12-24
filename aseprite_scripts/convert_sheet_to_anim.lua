@@ -87,14 +87,126 @@ local sheetPaddingBorder = getParamNumber("sheet_padding_border", 2)
 local sheetPaddingInner = getParamNumber("sheet_padding_inner", 2)
 local doTrim = getParamBool("trim", false)
 
+-- Simple JSON serialization (for meta.json)
+local function serializeJson(obj, indent)
+    indent = indent or 0
+    local spaces = string.rep("  ", indent)
+    local t = type(obj)
+
+    if t == "nil" then
+        return "null"
+    elseif t == "boolean" then
+        return tostring(obj)
+    elseif t == "number" then
+        if obj ~= obj then return "null" end  -- NaN
+        if obj == math.huge or obj == -math.huge then return "null" end
+        return tostring(obj)
+    elseif t == "string" then
+        return '"' .. obj:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r') .. '"'
+    elseif t == "table" then
+        -- Check if array
+        local isArray = #obj > 0 or next(obj) == nil
+        for k, _ in pairs(obj) do
+            if type(k) ~= "number" then
+                isArray = false
+                break
+            end
+        end
+
+        local parts = {}
+        if isArray then
+            for i, v in ipairs(obj) do
+                table.insert(parts, spaces .. "  " .. serializeJson(v, indent + 1))
+            end
+            if #parts == 0 then
+                return "[]"
+            end
+            return "[\n" .. table.concat(parts, ",\n") .. "\n" .. spaces .. "]"
+        else
+            for k, v in pairs(obj) do
+                if v ~= nil then
+                    table.insert(parts, spaces .. '  "' .. tostring(k) .. '": ' .. serializeJson(v, indent + 1))
+                end
+            end
+            if #parts == 0 then
+                return "{}"
+            end
+            return "{\n" .. table.concat(parts, ",\n") .. "\n" .. spaces .. "}"
+        end
+    else
+        return "null"
+    end
+end
+
+local function paramsSnapshot()
+    return {
+        input_path = inputPath,
+        output_dir = outputDir,
+        job_name = jobName,
+        grid = {
+            rows = gridRows,
+            cols = gridCols,
+            offset_x = gridOffsetX,
+            offset_y = gridOffsetY,
+            pad_x = gridPadX,
+            pad_y = gridPadY
+        },
+        timing = {
+            fps = fps,
+            loop_mode = loopMode
+        },
+        anchor = {
+            mode = anchorMode,
+            alpha_thresh = anchorAlphaThresh
+        },
+        background = {
+            mode = bgMode,
+            color = {bgR, bgG, bgB},
+            tolerance = bgTolerance
+        },
+        export = {
+            aseprite = exportAseprite,
+            sheet = exportSheet,
+            gif = exportGif,
+            sheet_padding_border = sheetPaddingBorder,
+            sheet_padding_inner = sheetPaddingInner,
+            trim = doTrim
+        }
+    }
+end
+
+local function writeMeta(status, payload)
+    if outputDir == nil or outputDir == "" then
+        return false
+    end
+
+    local metaPath = outputDir .. "/meta.json"
+    local meta = payload or {}
+    meta.status = status
+    if meta.error_code == nil then meta.error_code = "" end
+    if meta.error_message == nil then meta.error_message = "" end
+    if meta.params == nil then meta.params = paramsSnapshot() end
+
+    local metaJson = serializeJson(meta)
+    local metaFile = io.open(metaPath, "w")
+    if metaFile then
+        metaFile:write(metaJson)
+        metaFile:close()
+        return true
+    end
+    return false
+end
+
 -- Validate required parameters
 if inputPath == "" then
     print("Error: input_path is required")
+    writeMeta("failed", { error_code = "MISSING_INPUT_PATH", error_message = "input_path is required" })
     return
 end
 
 if outputDir == "" then
     print("Error: output_dir is required")
+    writeMeta("failed", { error_code = "MISSING_OUTPUT_DIR", error_message = "output_dir is required" })
     return
 end
 
@@ -118,6 +230,7 @@ local outputMeta = outputDir .. "/meta.json"
 -- Check input exists
 if not fileExists(inputPath) then
     print("Error: Input file not found: " .. inputPath)
+    writeMeta("failed", { error_code = "INPUT_NOT_FOUND", error_message = "Input file not found: " .. inputPath })
     return
 end
 
@@ -125,6 +238,7 @@ end
 local sourceSprite = app.open(inputPath)
 if not sourceSprite then
     print("Error: Failed to open image: " .. inputPath)
+    writeMeta("failed", { error_code = "SPRITE_OPEN_FAILED", error_message = "Failed to open image: " .. inputPath })
     return
 end
 
@@ -138,6 +252,7 @@ local frameHeight = math.floor((imgHeight - gridOffsetY - gridPadY * (gridRows -
 
 if frameWidth <= 0 or frameHeight <= 0 then
     print("Error: Invalid frame dimensions calculated")
+    writeMeta("failed", { error_code = "INVALID_FRAME_DIMENSIONS", error_message = "Invalid frame dimensions calculated" })
     sourceSprite:close()
     return
 end
@@ -156,6 +271,7 @@ local frameCount = #sourceSprite.frames
 
 if frameCount == 0 then
     print("Error: No frames after import")
+    writeMeta("failed", { error_code = "NO_FRAMES_AFTER_IMPORT", error_message = "No frames after import" })
     sourceSprite:close()
     return
 end
@@ -168,7 +284,7 @@ for i, frame in ipairs(sourceSprite.frames) do
     frame.duration = frameDurationMs / 1000.0  -- Aseprite uses seconds
 end
 
--- Background removal (flood-fill from edges)
+-- Background removal (color matching replacement)
 local function removeBackground(sprite)
     if bgMode ~= "transparent" then
         return
@@ -182,9 +298,8 @@ local function removeBackground(sprite)
             local w = img.width
             local h = img.height
             
-            -- Use Magic Wand style selection from edges
-            -- For now, we'll use a simpler approach: replace background color with transparent
-            -- A full flood-fill would require more complex implementation
+            -- Current approach: replace pixels that match the configured background color (with tolerance).
+            -- Future improvement: edge flood-fill to remove only connected background regions.
             
             for y = 0, h - 1 do
                 for x = 0, w - 1 do
@@ -431,6 +546,10 @@ for _, o in ipairs(offsets) do
 end
 
 local meta = {
+    status = "success",
+    error_code = "",
+    error_message = "",
+    params = paramsSnapshot(),
     job_name = jobName,
     frame_count = frameCount,
     fps = fps,
@@ -469,63 +588,7 @@ local meta = {
     }
 }
 
--- Simple JSON serialization
-local function serializeJson(obj, indent)
-    indent = indent or 0
-    local spaces = string.rep("  ", indent)
-    local t = type(obj)
-    
-    if t == "nil" then
-        return "null"
-    elseif t == "boolean" then
-        return tostring(obj)
-    elseif t == "number" then
-        if obj ~= obj then return "null" end  -- NaN
-        if obj == math.huge or obj == -math.huge then return "null" end
-        return tostring(obj)
-    elseif t == "string" then
-        return '"' .. obj:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r') .. '"'
-    elseif t == "table" then
-        -- Check if array
-        local isArray = #obj > 0 or next(obj) == nil
-        for k, _ in pairs(obj) do
-            if type(k) ~= "number" then
-                isArray = false
-                break
-            end
-        end
-        
-        local parts = {}
-        if isArray then
-            for i, v in ipairs(obj) do
-                table.insert(parts, spaces .. "  " .. serializeJson(v, indent + 1))
-            end
-            if #parts == 0 then
-                return "[]"
-            end
-            return "[\n" .. table.concat(parts, ",\n") .. "\n" .. spaces .. "]"
-        else
-            for k, v in pairs(obj) do
-                if v ~= nil then
-                    table.insert(parts, spaces .. '  "' .. tostring(k) .. '": ' .. serializeJson(v, indent + 1))
-                end
-            end
-            if #parts == 0 then
-                return "{}"
-            end
-            return "{\n" .. table.concat(parts, ",\n") .. "\n" .. spaces .. "}"
-        end
-    else
-        return "null"
-    end
-end
-
-local metaJson = serializeJson(meta)
-local metaFile = io.open(outputMeta, "w")
-if metaFile then
-    metaFile:write(metaJson)
-    metaFile:close()
-end
+writeMeta("success", meta)
 
 -- Close sprite
 sourceSprite:close()

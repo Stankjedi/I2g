@@ -1,13 +1,18 @@
 """
 Folder watcher module with stable write detection.
-Uses watchfiles (primary) or watchdog (fallback) for file system monitoring.
+Uses watchfiles (primary) with a polling fallback for file system monitoring.
 """
+
+from __future__ import annotations
 
 import asyncio
 import time
+import logging
 from pathlib import Path
 from typing import Callable, Optional, Set
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class StableWriteGuard:
@@ -82,6 +87,25 @@ class FolderWatcher:
         self._processed_files: Set[Path] = set()
         self._files_processed_count = 0
         self._last_activity: Optional[datetime] = None
+        self.poll_interval_seconds = 1.0
+        self._error_count = 0
+        self._last_error: Optional[str] = None
+        self._last_scan_at: Optional[datetime] = None
+        self._prune_threshold = 10_000
+
+    def _prune_state(self, current_files: Set[Path], seen_files: dict[Path, float]) -> None:
+        """Prune internal state to prevent unbounded growth in long-running watch mode."""
+        if self._processed_files:
+            self._processed_files.intersection_update(current_files)
+
+        for path in list(seen_files.keys()):
+            if path not in current_files:
+                seen_files.pop(path, None)
+
+    def _prune_processed_files_nonexistent(self) -> None:
+        if not self._processed_files:
+            return
+        self._processed_files = {path for path in self._processed_files if path.exists()}
     
     @property
     def is_running(self) -> bool:
@@ -94,6 +118,18 @@ class FolderWatcher:
     @property
     def last_activity(self) -> Optional[datetime]:
         return self._last_activity
+
+    @property
+    def error_count(self) -> int:
+        return self._error_count
+
+    @property
+    def last_error(self) -> Optional[str]:
+        return self._last_error
+
+    @property
+    def last_scan_at(self) -> Optional[datetime]:
+        return self._last_scan_at
     
     def _is_valid_file(self, path: Path) -> bool:
         """Check if file should be processed."""
@@ -123,24 +159,34 @@ class FolderWatcher:
                             # Wait for stable write
                             if await self.stable_guard.wait_for_stable(path):
                                 self._processed_files.add(path)
+                                if len(self._processed_files) > self._prune_threshold:
+                                    self._prune_processed_files_nonexistent()
                                 self._files_processed_count += 1
                                 self._last_activity = datetime.now()
                                 self.on_new_file(path)
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            self._error_count += 1
+            self._last_error = str(e)
+            logger.exception("watchfiles loop error: inbox=%s", self.inbox_dir)
+            await asyncio.sleep(1.0)
     
     async def _watch_loop_polling(self) -> None:
         """Fallback polling-based watch loop."""
         seen_files: dict[Path, float] = {}
-        poll_interval = 1.0  # seconds
+        poll_interval = self.poll_interval_seconds
         
         while self._running:
             try:
                 # Scan directory
+                self._last_scan_at = datetime.now()
                 current_files = {
                     p for p in self.inbox_dir.iterdir()
                     if self._is_valid_file(p)
                 }
+
+                self._prune_state(current_files, seen_files)
                 
                 for path in current_files:
                     if path in self._processed_files:
@@ -167,8 +213,11 @@ class FolderWatcher:
                 
             except asyncio.CancelledError:
                 break
-            except Exception:
-                await asyncio.sleep(poll_interval)
+            except Exception as e:
+                self._error_count += 1
+                self._last_error = str(e)
+                logger.exception("polling watch loop error: inbox=%s", self.inbox_dir)
+                await asyncio.sleep(min(poll_interval * 2, 5.0))
     
     async def start(self) -> None:
         """Start watching the folder."""

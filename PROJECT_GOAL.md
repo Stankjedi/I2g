@@ -38,7 +38,7 @@
 │  ↓                                                          │
 │  Aseprite CLI + Lua 스크립트                                │
 │  ├─ 프레임 분할 (그리드 기반 Import)                        │
-│  ├─ 배경 투명화 (edge flood-fill)                           │
+│  ├─ 배경 투명화 (색상 매칭 기반, 향후 flood-fill 가능)       │
 │  ├─ 기준점 정렬 (foot anchor)                               │
 │  ├─ 타이밍 설정 (FPS + 루프 모드)                           │
 │  └─ 내보내기 (.aseprite + PNG+JSON + GIF)                   │
@@ -62,7 +62,10 @@
 
 ## JobSpec (설정 오버라이드)
 
-기본은 자동 감지, 필요시 `xxx.job.json`으로 오버라이드:
+기본은 자동 감지이며, 입력 파일 옆에 `<입력파일 스템>.job.json`을 두면 설정을 오버라이드할 수 있습니다. (예: `walk.png` → `walk.job.json`)
+
+- **지원 키:** `grid`, `timing`, `anchor`, `background`, `export`, `auto_detect_grid`
+- **우선순위:** MCP 툴 인자(`grid_rows`, `grid_cols`, `fps`) > `.job.json` > 프로필 기본값
 
 ```json
 {
@@ -70,6 +73,7 @@
   "timing": { "fps": 12, "loop_mode": "loop" },
   "anchor": { "mode": "foot", "alpha_thresh": 10 },
   "background": { "mode": "transparent" },
+  "auto_detect_grid": true,
   "export": {
     "aseprite": true,
     "sheet_png_json": true,
@@ -87,8 +91,8 @@
 - 없으면 Python detector가 배경 분석으로 그리드 자동 추정
 
 ### 2. 배경 투명화
-- 단순 색상 치환이 아닌 **에지 flood-fill**로 연결된 배경만 투명화
-- 캐릭터 내부 흰색 디테일 보존
+- **현재 구현:** 배경색(`bg_color`)과 허용 오차(`bg_tolerance`)로 매칭되는 픽셀을 투명 처리(단순 색상 치환)
+- **향후 개선:** edge flood-fill 방식으로 연결된 배경만 제거하여 내부 디테일 보존을 강화
 
 ### 3. 기준점 정렬 (지터 제거)
 - `foot` 모드: 하단 불투명 픽셀 기준선 감지
@@ -117,9 +121,9 @@
 
 - **런타임**: Python 3.10+
 - **MCP 프레임워크**: FastMCP (python-sdk)
-- **폴더 감시**: watchfiles (기본), watchdog (fallback)
+- **폴더 감시**: watchfiles (기본), polling (fallback)
 - **스키마**: Pydantic
-- **이미지 분석**: Pillow (선택)
+- **이미지 분석**: Pillow (그리드 감지)
 - **변환 엔진**: Aseprite CLI + Lua
 - **후처리**: FFmpeg, gifsicle (선택)
 

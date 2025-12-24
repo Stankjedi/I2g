@@ -6,6 +6,8 @@ AI로 생성된 이미지의 배경을 자동으로 제거하는 GUI 도구입�
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
+[![Sponsor](https://img.shields.io/badge/💖_Sponsor-Support_Me-ff69b4?style=for-the-badge)](https://ctee.kr/place/stankjedi)
+
 ## ✨ 주요 기능
 
 - **윤곽선 기반 배경 제거**: 검은색 윤곽선을 감지하여 외부 배경만 제거
